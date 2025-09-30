@@ -1,0 +1,11 @@
+{
+  "name": "com.magi.unitytools",
+  "displayName": "Magi Unity Tools",
+  "version": "0.1.0",
+  "unity": "2023.3",
+  "description": "Common design patterns, diagnostics, and utilities for Unity projects.",
+  "author": {
+    "name": "Magi-AGI"
+  }
+}
+

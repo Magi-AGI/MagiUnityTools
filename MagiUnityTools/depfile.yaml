@@ -1,0 +1,16 @@
+registries:
+  magi: https://registry.example.com
+scopes:
+  - com.magi
+unity:
+  editor: 6000.2.0f1
+  rp: urp
+  rp_version: 17.0.3
+packages:
+  com.magi.unitytools: 0.1.0
+policy:
+  allowGitDependencies: false
+  bannedApis:
+    - Resources.Load
+    - FindObjectOfType
+

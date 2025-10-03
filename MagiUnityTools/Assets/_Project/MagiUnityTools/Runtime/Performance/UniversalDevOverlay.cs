@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace Magi.UnityTools.Runtime.Performance
@@ -171,7 +171,7 @@ namespace Magi.UnityTools.Runtime.Performance
         /// </summary>
         public static UniversalDevOverlay CreateSingleton()
         {
-            var existing = FindObjectOfType<UniversalDevOverlay>();
+            var existing = FindOverlayInstance();
             if (existing != null)
                 return existing;
 
@@ -179,6 +179,16 @@ namespace Magi.UnityTools.Runtime.Performance
             DontDestroyOnLoad(go);
             return go.AddComponent<UniversalDevOverlay>();
         }
+
+        private static UniversalDevOverlay FindOverlayInstance()
+        {
+#if UNITY_2023_1_OR_NEWER
+            return Object.FindFirstObjectByType<UniversalDevOverlay>();
+#else
+            return Object.FindObjectOfType<UniversalDevOverlay>();
+#endif
+        }
+
     }
 
     /// <summary>
@@ -219,3 +229,9 @@ namespace Magi.UnityTools.Runtime.Performance
         }
     }
 }
+
+
+
+
+
+

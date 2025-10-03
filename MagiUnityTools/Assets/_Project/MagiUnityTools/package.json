@@ -1,11 +1,14 @@
-{
-  "name": "com.magi.unitytools",
-  "displayName": "Magi Unity Tools",
-  "version": "0.1.0",
-  "unity": "2023.3",
-  "description": "Common design patterns, diagnostics, and utilities for Unity projects.",
-  "author": {
-    "name": "Magi-AGI"
-  }
+﻿{
+    "name":  "com.magi.unitytools",
+    "displayName":  "Magi Unity Tools",
+    "version":  "0.1.0",
+    "unity":  "2023.3",
+    "description":  "Common design patterns, diagnostics, and utilities for Unity projects.",
+    "author":  {
+                   "name":  "Magi-AGI"
+               },
+    "dependencies":  {
+                         "com.unity.mathematics":  "1.3.2",
+                         "com.unity.burst":  "1.8.5"
+                     }
 }
-

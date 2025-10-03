@@ -1,20 +1,20 @@
-// Universal type definitions for consistent usage between C# and HLSL
+﻿// Universal type definitions for consistent usage between C# and HLSL
 // Provides standard Unity.Mathematics type aliases for cross-platform development
 
 // Standard precision types for convenience
-global using float2 = Unity.Mathematics.float2;
-global using float3 = Unity.Mathematics.float3;
-global using float4 = Unity.Mathematics.float4;
-global using float2x2 = Unity.Mathematics.float2x2;
-global using float3x3 = Unity.Mathematics.float3x3;
-global using float4x4 = Unity.Mathematics.float4x4;
+using float2 = Unity.Mathematics.float2;
+using float3 = Unity.Mathematics.float3;
+using float4 = Unity.Mathematics.float4;
+using float2x2 = Unity.Mathematics.float2x2;
+using float3x3 = Unity.Mathematics.float3x3;
+using float4x4 = Unity.Mathematics.float4x4;
 
-global using int2 = Unity.Mathematics.int2;
-global using int3 = Unity.Mathematics.int3;
-global using int4 = Unity.Mathematics.int4;
-global using uint2 = Unity.Mathematics.uint2;
-global using uint3 = Unity.Mathematics.uint3;
-global using uint4 = Unity.Mathematics.uint4;
+using int2 = Unity.Mathematics.int2;
+using int3 = Unity.Mathematics.int3;
+using int4 = Unity.Mathematics.int4;
+using uint2 = Unity.Mathematics.uint2;
+using uint3 = Unity.Mathematics.uint3;
+using uint4 = Unity.Mathematics.uint4;
 
 namespace Magi.UnityTools.Runtime.Core
 {
@@ -30,7 +30,7 @@ namespace Magi.UnityTools.Runtime.Core
         /// </summary>
         public const string HLSL_TYPES_INCLUDE = @"
 // Universal type definitions for HLSL
-// Matches the C# global usings in UniversalTypes.cs
+// Matches the C# usings in UniversalTypes.cs
 
 #ifndef MAGI_UNIVERSAL_TYPES_HLSL
 #define MAGI_UNIVERSAL_TYPES_HLSL

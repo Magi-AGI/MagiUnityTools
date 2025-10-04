@@ -1,6 +1,6 @@
 using System;
 
-namespace Magi.UnityTools.Runtime.Core
+namespace Magi.UnityTools.Core
 {
     /// <summary>
     /// Marks a struct as shared between C# and HLSL.
@@ -36,7 +36,7 @@ namespace Magi.YourProject
 {
     [StructLayout(LayoutKind.Sequential, Pack = 0)]
     [Serializable]
-    [Magi.UnityTools.Runtime.Core.SharedStruct]
+    [Magi.UnityTools.Core.SharedStruct]
 #else
 #define public
 #endif

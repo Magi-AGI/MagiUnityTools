@@ -13,28 +13,28 @@ Runtime helpers and editor tooling for Unity development.
 ### Package Structure
 
 ```
-Packages/
-└── com.magi.unitytools/
-    ├── package.json              # UPM manifest
-    ├── Runtime/
-    │   ├── Patterns/            # Design patterns
-    │   │   ├── Singleton/       # Singleton implementations
-    │   │   ├── ObjectPool/      # Object pooling systems
-    │   │   ├── StateMachine/    # FSM implementations
-    │   │   └── Command/         # Command pattern
-    │   ├── Diagnostics/         # Performance monitoring
-    │   │   ├── ProfilerHelpers.cs
-    │   │   ├── MemoryTracker.cs
-    │   │   └── FPSMonitor.cs
-    │   └── Math/                # Mathematical utilities
-    │       ├── FastMath.cs      # Optimized math operations
-    │       ├── Interpolation.cs # Easing functions
-    │       └── Noise.cs         # Noise generation
-    └── Editor/
-        └── Analyzers/           # Code analysis tools
-            ├── PerformanceAnalyzer.cs
-            └── PatternValidator.cs
+Assets/
+└── _Project/
+    ├── Scripts/
+    │   └── UnityTools/
+    │       ├── Core/
+    │       ├── Diagnostics/
+    │       ├── Patterns/
+    │       ├── Performance/
+    │       ├── Magi.UnityTools.asmdef
+    │       └── package.json
+    └── Editor/ (optional)
 ```
+### Using with MagiUnityDependencyManager
+
+```yaml
+packages:
+  com.magi.unitytools: file:../../MagiUnityTools/MagiUnityTools/Assets/_Project/Scripts/UnityTools
+```
+
+Run `../MagiUnityDependencyManager/magi-deps.ps1 apply -ProjectPath ./MyProject -Strict` to regenerate `Packages/manifest.json`, then `verify -Strict` before committing.
+
+
 
 ## Core Features
 

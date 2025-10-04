@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace Magi.UnityTools.Runtime.Core
+namespace Magi.UnityTools.Core
 {
     /// <summary>
     /// Generic ping-pong buffer system for GPU compute operations.

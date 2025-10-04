@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
 
-namespace Magi.UnityTools.Runtime.Performance
+namespace Magi.UnityTools.Performance
 {
     /// <summary>
     /// Universal development overlay for performance monitoring and debugging.

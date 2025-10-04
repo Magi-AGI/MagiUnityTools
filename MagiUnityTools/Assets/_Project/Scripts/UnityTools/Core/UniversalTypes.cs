@@ -16,7 +16,7 @@ using uint2 = Unity.Mathematics.uint2;
 using uint3 = Unity.Mathematics.uint3;
 using uint4 = Unity.Mathematics.uint4;
 
-namespace Magi.UnityTools.Runtime.Core
+namespace Magi.UnityTools.Core
 {
     /// <summary>
     /// Universal type system for cross-platform Unity development.

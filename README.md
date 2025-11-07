@@ -29,7 +29,7 @@ Assets/
 
 ```yaml
 packages:
-  com.magi.unitytools: file:../../MagiUnityTools/MagiUnityTools/Assets/_Project/Scripts/UnityTools
+  com.magi.unitytools: file:../../MagiUnityTools/MagiUnityTools/Assets/_Project/Scripts
 ```
 
 Run `../MagiUnityDependencyManager/magi-deps.ps1 apply -ProjectPath ./MyProject -Strict` to regenerate `Packages/manifest.json`, then `verify -Strict` before committing.

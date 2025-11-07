@@ -1,0 +1,26 @@
+﻿{
+    "name":  "Magi.UnityTools",
+    "references":  [
+                       "Unity.Mathematics",
+                       "Unity.Burst"
+                   ],
+    "includePlatforms":  [
+
+                         ],
+    "excludePlatforms":  [
+
+                         ],
+    "allowUnsafeCode":  true,
+    "overrideReferences":  false,
+    "precompiledReferences":  [
+
+                              ],
+    "autoReferenced":  true,
+    "defineConstraints":  [
+
+                          ],
+    "versionDefines":  [
+
+                       ],
+    "noEngineReferences":  false
+}

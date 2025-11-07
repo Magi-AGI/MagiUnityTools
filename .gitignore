@@ -92,3 +92,39 @@
 
 # Auto-generated scenes by play mode tests
 */[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Enhanced recursive Unity ignores (support nested subprojects)
+**/.utmp/
+**/[Ll]ibrary/
+**/[Tt]emp/
+**/[Oo]bj/
+**/[Bb]uild/
+**/[Bb]uilds/
+**/[Ll]ogs/
+**/[Uu]ser[Ss]ettings/
+**/*.log
+**/[Mm]emoryCaptures/
+**/[Rr]ecordings/
+**/.vs/
+**/.gradle/
+**/*.csproj
+**/*.unityproj
+**/*.sln
+**/*.suo
+**/*.tmp
+**/*.user
+**/*.userprefs
+**/*.pidb
+**/*.booproj
+**/*.svd
+**/*.pdb
+**/*.mdb
+**/*.opendb
+**/*.VC.db
+**/*.DotSettings.user
+
+# Root OS/IDE ignores
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

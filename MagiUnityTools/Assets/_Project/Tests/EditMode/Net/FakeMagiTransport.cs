@@ -1,0 +1,75 @@
+using System;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
+using Magi.UnityTools.Net;
+using MagiGameServer.Contracts.Core;
+using MagiGameServer.Contracts.Protocol;
+
+namespace Magi.UnityTools.Net.Tests
+{
+    /// In-memory IMagiTransport used by MagiSession EditMode tests. Records
+    /// outbound envelopes (so tests can assert what the codec produced)
+    /// and exposes PushFrame / PushError to let tests drive the inbound
+    /// side. OpenSessionAsync returns a caller-supplied SessionId —
+    /// avoids the need for a deterministic GUID generator in tests.
+    internal sealed class FakeMagiTransport<TState, TAction> : IMagiTransport<TState, TAction>
+    {
+        private readonly SessionId _sessionToReturn;
+        public ConcurrentQueue<ActionEnvelope<TAction>> SentActions { get; } = new ConcurrentQueue<ActionEnvelope<TAction>>();
+        public ConcurrentQueue<TakebackRequest> SentTakebacks { get; } = new ConcurrentQueue<TakebackRequest>();
+        public int OpenCalls;
+        public int AttachCalls;
+        public int DisposeCalls;
+        public SessionId AttachedSession;
+        public SeatId AttachedSeat;
+
+        public event Action<ServerFrame<TState>> OnFrame;
+        public event Action<Exception> OnTransportError;
+
+        public FakeMagiTransport(SessionId sessionToReturn)
+        {
+            _sessionToReturn = sessionToReturn;
+        }
+
+        public Task<SessionId> OpenSessionAsync(MagiSessionConfig config, CancellationToken ct)
+        {
+            Interlocked.Increment(ref OpenCalls);
+            return Task.FromResult(_sessionToReturn);
+        }
+
+        public Task AttachAsync(SessionId session, SeatId seat, CancellationToken ct)
+        {
+            Interlocked.Increment(ref AttachCalls);
+            AttachedSession = session;
+            AttachedSeat = seat;
+            return Task.CompletedTask;
+        }
+
+        public Task SendAsync(ActionEnvelope<TAction> envelope, CancellationToken ct)
+        {
+            SentActions.Enqueue(envelope);
+            return Task.CompletedTask;
+        }
+
+        public Task SendAsync(TakebackRequest request, CancellationToken ct)
+        {
+            SentTakebacks.Enqueue(request);
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref DisposeCalls);
+            return default;
+        }
+
+        /// Simulates a server frame arriving on the transport's receive
+        /// thread. Invokes OnFrame on the calling thread — tests use this
+        /// from background threads to prove MagiSession queues rather
+        /// than routing synchronously.
+        public void PushFrame(ServerFrame<TState> frame) => OnFrame?.Invoke(frame);
+
+        public void PushError(Exception ex) => OnTransportError?.Invoke(ex);
+    }
+}

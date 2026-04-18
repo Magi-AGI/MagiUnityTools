@@ -1,0 +1,187 @@
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.WebSockets;
+using System.Threading;
+using System.Threading.Tasks;
+using MagiGameServer.Codec;
+using MagiGameServer.Contracts.Core;
+using MagiGameServer.Contracts.Protocol;
+
+namespace Magi.UnityTools.Net
+{
+    /// Real-socket implementation of IMagiTransport. All wire-shape work
+    /// (JSON bytes ↔ ClientFrame / ServerFrame) is confined to this class
+    /// so MagiSession sees only typed frames — the one place the codec
+    /// is loaded.
+    ///
+    /// Sends are serialized with a SemaphoreSlim because ClientWebSocket
+    /// forbids concurrent SendAsync calls and the dispatcher can raise
+    /// OutgoingAction / OutgoingTakeback back-to-back from the main
+    /// thread. The receive loop runs as a single background Task so
+    /// ReceiveAsync is likewise never called concurrently.
+    public sealed class WebSocketMagiTransport<TState, TAction> : IMagiTransport<TState, TAction>
+    {
+        private readonly HttpClient _http;
+        private readonly bool _ownsHttp;
+        private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
+        private ClientWebSocket _ws;
+        private Task _receiveTask;
+        private CancellationTokenSource _cts;
+        private string _baseUri;
+        private int _disposed;
+
+        public event Action<ServerFrame<TState>> OnFrame;
+        public event Action<Exception> OnTransportError;
+
+        public WebSocketMagiTransport() : this(null) { }
+
+        /// Accepts an externally-owned HttpClient so callers can control
+        /// pooling, base handlers, timeouts, auth headers. Passing null
+        /// creates (and disposes) a private client.
+        public WebSocketMagiTransport(HttpClient http)
+        {
+            _http = http ?? new HttpClient();
+            _ownsHttp = http == null;
+        }
+
+        public async Task<SessionId> OpenSessionAsync(MagiSessionConfig config, CancellationToken ct)
+        {
+            if (config == null) throw new ArgumentNullException(nameof(config));
+            if (string.IsNullOrEmpty(config.BaseUri)) throw new ArgumentException("BaseUri required", nameof(config));
+            _baseUri = config.BaseUri.TrimEnd('/');
+
+            var req = new OpenSessionRequest
+            {
+                GameId = config.GameId,
+                SeatCount = config.SeatCount,
+                Seed = config.Seed,
+                Options = config.Options,
+            };
+            var body = EnvelopeCodec.Serialize(req);
+            using var content = new ByteArrayContent(body);
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            using var resp = await _http.PostAsync(_baseUri + "/session/open", content, ct).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+            var payload = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            var parsed = EnvelopeCodec.Deserialize<OpenSessionResponse>(payload);
+            if (parsed == null) throw new InvalidOperationException("Server returned empty OpenSessionResponse");
+            return parsed.Session;
+        }
+
+        public async Task AttachAsync(SessionId session, SeatId seat, CancellationToken ct)
+        {
+            if (_ws != null) throw new InvalidOperationException("AttachAsync already called");
+            if (string.IsNullOrEmpty(_baseUri)) throw new InvalidOperationException("OpenSessionAsync must run before AttachAsync");
+
+            _ws = new ClientWebSocket();
+            _cts = new CancellationTokenSource();
+            await _ws.ConnectAsync(BuildWebSocketUri(session, seat), ct).ConfigureAwait(false);
+            _receiveTask = Task.Run(ReceiveLoopAsync);
+        }
+
+        public Task SendAsync(ActionEnvelope<TAction> envelope, CancellationToken ct)
+        {
+            if (envelope == null) throw new ArgumentNullException(nameof(envelope));
+            var frame = new ClientFrame<TAction> { Kind = ClientFrameKind.Action, Action = envelope };
+            return SendFrameAsync(frame, ct);
+        }
+
+        public Task SendAsync(TakebackRequest request, CancellationToken ct)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            var frame = new ClientFrame<TAction> { Kind = ClientFrameKind.Takeback, Takeback = request };
+            return SendFrameAsync(frame, ct);
+        }
+
+        private async Task SendFrameAsync(ClientFrame<TAction> frame, CancellationToken ct)
+        {
+            if (_ws == null || _ws.State != WebSocketState.Open)
+                throw new InvalidOperationException("WebSocket not open; AttachAsync must complete first");
+
+            var bytes = EnvelopeCodec.Serialize(frame);
+            await _sendLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, endOfMessage: true, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
+        }
+
+        private async Task ReceiveLoopAsync()
+        {
+            var buffer = new byte[8192];
+            var accumulator = new List<byte>();
+            try
+            {
+                while (_ws.State == WebSocketState.Open && !_cts.IsCancellationRequested)
+                {
+                    accumulator.Clear();
+                    WebSocketReceiveResult result;
+                    do
+                    {
+                        result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token).ConfigureAwait(false);
+                        if (result.MessageType == WebSocketMessageType.Close) return;
+                        if (result.Count > 0)
+                        {
+                            for (int i = 0; i < result.Count; i++) accumulator.Add(buffer[i]);
+                        }
+                    } while (!result.EndOfMessage);
+
+                    if (accumulator.Count == 0) continue;
+                    try
+                    {
+                        var frame = EnvelopeCodec.Deserialize<ServerFrame<TState>>(accumulator.ToArray());
+                        if (frame != null) OnFrame?.Invoke(frame);
+                    }
+                    catch (Exception ex)
+                    {
+                        OnTransportError?.Invoke(ex);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (WebSocketException ex) { OnTransportError?.Invoke(ex); }
+            catch (Exception ex) { OnTransportError?.Invoke(ex); }
+        }
+
+        private Uri BuildWebSocketUri(SessionId session, SeatId seat)
+        {
+            // Derive ws:// from http:// (wss:// from https://). Falls back to
+            // inserting ws:// if BaseUri didn't include a scheme — but
+            // OpenSessionAsync already threw on empty, so this is defensive.
+            string scheme = "ws";
+            string rest = _baseUri;
+            int schemeEnd = _baseUri.IndexOf("://", StringComparison.Ordinal);
+            if (schemeEnd >= 0)
+            {
+                var proto = _baseUri.Substring(0, schemeEnd);
+                scheme = string.Equals(proto, "https", StringComparison.OrdinalIgnoreCase) ? "wss" : "ws";
+                rest = _baseUri.Substring(schemeEnd + 3);
+            }
+            return new Uri($"{scheme}://{rest}/session/{session.Value}?seat={seat.Value}");
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            try { _cts?.Cancel(); } catch { }
+            if (_ws != null && (_ws.State == WebSocketState.Open || _ws.State == WebSocketState.CloseReceived))
+            {
+                try { await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None).ConfigureAwait(false); } catch { }
+            }
+            if (_receiveTask != null)
+            {
+                try { await _receiveTask.ConfigureAwait(false); } catch { }
+            }
+            _ws?.Dispose();
+            _cts?.Dispose();
+            _sendLock.Dispose();
+            if (_ownsHttp) _http.Dispose();
+        }
+    }
+}

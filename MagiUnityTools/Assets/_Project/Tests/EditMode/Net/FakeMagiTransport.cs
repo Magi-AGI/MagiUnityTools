@@ -23,6 +23,10 @@ namespace Magi.UnityTools.Net.Tests
         public int DisposeCalls;
         public SessionId AttachedSession;
         public SeatId AttachedSeat;
+        /// Set to non-null to make the NEXT AttachAsync throw this exception
+        /// (then cleared). Lets a single transport instance exercise both
+        /// the failure path and a subsequent successful retry.
+        public Exception FailNextAttachWith;
 
         public event Action<ServerFrame<TState>> OnFrame;
         public event Action<Exception> OnTransportError;
@@ -41,6 +45,8 @@ namespace Magi.UnityTools.Net.Tests
         public Task AttachAsync(SessionId session, SeatId seat, CancellationToken ct)
         {
             Interlocked.Increment(ref AttachCalls);
+            var pendingFailure = Interlocked.Exchange(ref FailNextAttachWith, null);
+            if (pendingFailure != null) return Task.FromException(pendingFailure);
             AttachedSession = session;
             AttachedSeat = seat;
             return Task.CompletedTask;

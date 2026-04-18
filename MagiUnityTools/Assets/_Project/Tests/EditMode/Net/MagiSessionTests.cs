@@ -331,6 +331,40 @@ namespace Magi.UnityTools.Net.Tests
         }
 
         [Test]
+        public void ConnectAsync_AttachFailure_LeavesSessionUnconnected()
+        {
+            var transport = new FakeMagiTransport<string, string>(TestSession());
+            var session = new MagiSession<string, string>(transport);
+            var boom = new InvalidOperationException("attach refused");
+            transport.FailNextAttachWith = boom;
+
+            var ex = Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await session.ConnectAsync(TestConfig(), new SeatId(1), CancellationToken.None));
+            Assert.AreSame(boom, ex);
+            Assert.IsFalse(session.IsConnected, "Half-connected state must not leak IsConnected=true");
+            Assert.IsNull(session.Dispatcher, "Dispatcher must not be published on attach failure");
+            Assert.Throws<InvalidOperationException>(() => session.Submit("x", 0),
+                "Submit must stay blocked — the transport never attached");
+        }
+
+        [Test]
+        public async Task ConnectAsync_AfterAttachFailure_RetrySucceeds()
+        {
+            var transport = new FakeMagiTransport<string, string>(TestSession());
+            var session = new MagiSession<string, string>(transport);
+            transport.FailNextAttachWith = new InvalidOperationException("first try");
+
+            Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await session.ConnectAsync(TestConfig(), new SeatId(1), CancellationToken.None));
+
+            // Retry with a fresh attach — must not trip the "already connected" guard.
+            await session.ConnectAsync(TestConfig(), new SeatId(1), CancellationToken.None);
+            Assert.IsTrue(session.IsConnected);
+            Assert.AreEqual(2, transport.AttachCalls);
+            await session.DisposeAsync();
+        }
+
+        [Test]
         public async Task DisposeAsync_DisposesTransport()
         {
             var (session, transport) = await NewConnectedSession();

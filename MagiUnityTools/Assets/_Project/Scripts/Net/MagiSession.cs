@@ -81,20 +81,28 @@ namespace Magi.UnityTools.Net
             if (config == null) throw new ArgumentNullException(nameof(config));
             if (_dispatcher != null) throw new InvalidOperationException("Session already connected");
 
-            _session = await _transport.OpenSessionAsync(config, ct).ConfigureAwait(false);
-            _seat = seat;
-            _dispatcher = new SessionDispatcher<TState, TAction>(_session, seat);
-            _dispatcher.OnSessionJoined += e => OnSessionJoined?.Invoke(e);
-            _dispatcher.OnStateAdvanced += e => OnStateAdvanced?.Invoke(e);
-            _dispatcher.OnPredictionMatched += e => OnPredictionMatched?.Invoke(e);
-            _dispatcher.OnPredictionDiverged += e => OnPredictionDiverged?.Invoke(e);
-            _dispatcher.OnTakebackBroadcast += e => OnTakebackBroadcast?.Invoke(e);
-            _dispatcher.OnTakebackReply += e => OnTakebackReply?.Invoke(e);
-            _dispatcher.OnError += e => OnError?.Invoke(e);
-            _dispatcher.OutgoingAction += SendActionFireAndForget;
-            _dispatcher.OutgoingTakeback += SendTakebackFireAndForget;
+            // Build the dispatcher in locals and only publish it to
+            // instance fields after AttachAsync succeeds. If OpenSessionAsync
+            // or AttachAsync throws, _dispatcher stays null — IsConnected
+            // stays false, Submit still blocks, and the caller can retry
+            // ConnectAsync without tripping the "already connected" guard.
+            var session = await _transport.OpenSessionAsync(config, ct).ConfigureAwait(false);
+            var dispatcher = new SessionDispatcher<TState, TAction>(session, seat);
+            dispatcher.OnSessionJoined += e => OnSessionJoined?.Invoke(e);
+            dispatcher.OnStateAdvanced += e => OnStateAdvanced?.Invoke(e);
+            dispatcher.OnPredictionMatched += e => OnPredictionMatched?.Invoke(e);
+            dispatcher.OnPredictionDiverged += e => OnPredictionDiverged?.Invoke(e);
+            dispatcher.OnTakebackBroadcast += e => OnTakebackBroadcast?.Invoke(e);
+            dispatcher.OnTakebackReply += e => OnTakebackReply?.Invoke(e);
+            dispatcher.OnError += e => OnError?.Invoke(e);
+            dispatcher.OutgoingAction += SendActionFireAndForget;
+            dispatcher.OutgoingTakeback += SendTakebackFireAndForget;
 
-            await _transport.AttachAsync(_session, seat, ct).ConfigureAwait(false);
+            await _transport.AttachAsync(session, seat, ct).ConfigureAwait(false);
+
+            _session = session;
+            _seat = seat;
+            _dispatcher = dispatcher;
         }
 
         public void Submit(TAction action, long predictedStateHash)

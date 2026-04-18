@@ -15,6 +15,7 @@
     "overrideReferences": true,
     "precompiledReferences": [
         "MagiGameServer.Contracts.dll",
+        "MagiGameServer.Core.dll",
         "MagiGameServer.Client.dll",
         "MagiGameServer.Codec.dll",
         "System.Text.Json.dll",

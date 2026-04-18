@@ -19,7 +19,6 @@
         "MagiGameServer.Codec.dll",
         "System.Text.Json.dll",
         "System.Text.Encodings.Web.dll",
-        "Microsoft.Bcl.AsyncInterfaces.dll",
         "nunit.framework.dll"
     ],
     "autoReferenced": false,

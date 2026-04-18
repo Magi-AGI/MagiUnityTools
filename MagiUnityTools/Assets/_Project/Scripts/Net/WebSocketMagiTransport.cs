@@ -26,6 +26,7 @@ namespace Magi.UnityTools.Net
         private readonly HttpClient _http;
         private readonly bool _ownsHttp;
         private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
+        private readonly SessionId? _presetSession;
         private ClientWebSocket _ws;
         private Task _receiveTask;
         private CancellationTokenSource _cts;
@@ -46,8 +47,31 @@ namespace Magi.UnityTools.Net
             _ownsHttp = http == null;
         }
 
+        /// Secondary-seat ctor for multi-seat drivers that open one server
+        /// session and attach N sockets to it. Pre-seeds the base URI and
+        /// the SessionId so OpenSessionAsync can skip the POST — only the
+        /// primary seat's transport should POST /session/open, the rest
+        /// reuse the result. Callers still invoke MagiSession.ConnectAsync
+        /// the same way; the transport just returns the known SessionId
+        /// without hitting the wire.
+        public WebSocketMagiTransport(HttpClient http, string baseUri, SessionId session)
+            : this(http)
+        {
+            if (string.IsNullOrEmpty(baseUri)) throw new ArgumentException("baseUri required", nameof(baseUri));
+            _baseUri = baseUri.TrimEnd('/');
+            _presetSession = session;
+        }
+
         public async Task<SessionId> OpenSessionAsync(MagiSessionConfig config, CancellationToken ct)
         {
+            if (_presetSession.HasValue)
+            {
+                // Secondary path: the driver already POSTed and handed us
+                // the SessionId. Config.BaseUri may be null on this path;
+                // ctor pre-seeded _baseUri for AttachAsync.
+                return _presetSession.Value;
+            }
+
             if (config == null) throw new ArgumentNullException(nameof(config));
             if (string.IsNullOrEmpty(config.BaseUri)) throw new ArgumentException("BaseUri required", nameof(config));
             _baseUri = config.BaseUri.TrimEnd('/');

@@ -375,6 +375,115 @@ namespace Magi.UnityTools.Net.Tests
             Assert.AreEqual(1, transport.DisposeCalls);
         }
 
+        // P3 (JIP): zero-config attach. The server picks the seat; the
+        // client learns which seat it landed on through the transport
+        // return value. Dispatcher is bound to that seat, so outgoing
+        // envelopes stamp it as the Submitting seat.
+        [Test]
+        public async Task ConnectAsync_NoSeat_UsesServerClaimedSeat()
+        {
+            var transport = new FakeMagiTransport<string, string>(TestSession())
+            {
+                ClaimedSeatToReturn = new SeatId(3),
+            };
+            var session = new MagiSession<string, string>(transport);
+
+            await session.ConnectAsync(TestConfig(), CancellationToken.None);
+
+            Assert.IsTrue(session.IsConnected);
+            Assert.AreEqual(new SeatId(3), session.Seat, "Seat must come from server claim, not from caller");
+            Assert.AreEqual(new SeatId(3), transport.AttachedSeat);
+            Assert.AreEqual(TestSession(), session.Session);
+        }
+
+        [Test]
+        public async Task ConnectAsync_NoSeat_Failed_LeavesSessionDisconnected()
+        {
+            // ClaimAndAttachAsync faults (e.g. session_full). MagiSession
+            // must not publish _dispatcher — IsConnected stays false so
+            // the caller can surface the failure and offer retry.
+            var transport = new FakeMagiTransport<string, string>(TestSession())
+            {
+                FailNextAttachWith = new InvalidOperationException("session_full"),
+            };
+            var session = new MagiSession<string, string>(transport);
+
+            Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await session.ConnectAsync(TestConfig(), CancellationToken.None));
+            Assert.IsFalse(session.IsConnected);
+            Assert.Throws<InvalidOperationException>(() => session.Submit("x", 0),
+                "Submit must stay guarded when the claim attach failed");
+        }
+
+        // P5-5c: JoinSnapshot carries a per-seat reconnect token. MagiSession
+        // stashes it on the main thread so a later ReattachAsync call can
+        // present it without the game layer ever having to touch the frame.
+        [Test]
+        public async Task Tick_StashesReconnectToken_FromJoinSnapshot()
+        {
+            var (session, transport) = await NewConnectedSession();
+            Assert.IsNull(session.ReconnectToken, "Token is not published until the snapshot drains through Tick");
+
+            transport.PushFrame(new ServerFrame<string>
+            {
+                Kind = ServerFrameKind.JoinSnapshot,
+                JoinSnapshot = new JoinSnapshot<string>
+                {
+                    Session = session.Session,
+                    ForSeat = session.Seat,
+                    Revision = new ServerSeq(0),
+                    State = "initial",
+                    StateHash = 1,
+                    ReconnectToken = "tok-abc",
+                },
+            });
+            session.Tick();
+            Assert.AreEqual("tok-abc", session.ReconnectToken);
+        }
+
+        // ReattachAsync: caller opens a fresh MagiSession wrapping a transport
+        // that has been pre-seeded to return the same SessionId, then asks
+        // MagiSession to reattach with the stashed token. The dispatcher is
+        // rebuilt for the same seat so subsequent Submit/Tick work continues.
+        [Test]
+        public async Task ReattachAsync_UsesToken_RebindsDispatcherForSameSeat()
+        {
+            var transport = new FakeMagiTransport<string, string>(TestSession());
+            var session = new MagiSession<string, string>(transport);
+
+            await session.ReattachAsync(TestConfig(), TestSession(), new SeatId(1), "tok-xyz", CancellationToken.None);
+
+            Assert.IsTrue(session.IsConnected);
+            Assert.AreEqual(TestSession(), session.Session);
+            Assert.AreEqual(new SeatId(1), session.Seat);
+            Assert.AreEqual("tok-xyz", transport.ReattachedToken);
+            Assert.AreEqual(new SeatId(1), transport.AttachedSeat);
+        }
+
+        [Test]
+        public void ReattachAsync_NullToken_Throws()
+        {
+            var transport = new FakeMagiTransport<string, string>(TestSession());
+            var session = new MagiSession<string, string>(transport);
+            Assert.ThrowsAsync<ArgumentException>(async () =>
+                await session.ReattachAsync(TestConfig(), TestSession(), new SeatId(1), "", CancellationToken.None));
+        }
+
+        [Test]
+        public async Task ReattachAsync_SessionMismatch_Throws()
+        {
+            // The transport hands back its own session from OpenSessionAsync;
+            // if the caller passes a different target session to reattach,
+            // MagiSession must refuse rather than silently rebind to the
+            // transport's session.
+            var transport = new FakeMagiTransport<string, string>(new SessionId("opened"));
+            var session = new MagiSession<string, string>(transport);
+            Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await session.ReattachAsync(TestConfig(), new SessionId("wanted"), new SeatId(0), "tok", CancellationToken.None));
+            Assert.IsFalse(session.IsConnected);
+            await session.DisposeAsync();
+        }
+
         private static async Task<(MagiSession<string, string> session, FakeMagiTransport<string, string> transport)> NewConnectedSession()
         {
             var transport = new FakeMagiTransport<string, string>(TestSession());

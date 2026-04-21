@@ -27,6 +27,10 @@ namespace Magi.UnityTools.Net.Tests
         /// (then cleared). Lets a single transport instance exercise both
         /// the failure path and a subsequent successful retry.
         public Exception FailNextAttachWith;
+        /// Seat the fake transport hands back from ClaimAndAttachAsync.
+        /// Tests that exercise the zero-config path set this before calling
+        /// MagiSession.ConnectAsync(config, ct).
+        public SeatId ClaimedSeatToReturn = new SeatId(0);
 
         public event Action<ServerFrame<TState>> OnFrame;
         public event Action<Exception> OnTransportError;
@@ -49,6 +53,29 @@ namespace Magi.UnityTools.Net.Tests
             if (pendingFailure != null) return Task.FromException(pendingFailure);
             AttachedSession = session;
             AttachedSeat = seat;
+            return Task.CompletedTask;
+        }
+
+        public Task<SeatId> ClaimAndAttachAsync(SessionId session, CancellationToken ct)
+        {
+            Interlocked.Increment(ref AttachCalls);
+            var pendingFailure = Interlocked.Exchange(ref FailNextAttachWith, null);
+            if (pendingFailure != null) return Task.FromException<SeatId>(pendingFailure);
+            AttachedSession = session;
+            AttachedSeat = ClaimedSeatToReturn;
+            return Task.FromResult(ClaimedSeatToReturn);
+        }
+
+        public string ReattachedToken;
+
+        public Task ReattachAsync(SessionId session, SeatId seat, string reconnectToken, CancellationToken ct)
+        {
+            Interlocked.Increment(ref AttachCalls);
+            var pendingFailure = Interlocked.Exchange(ref FailNextAttachWith, null);
+            if (pendingFailure != null) return Task.FromException(pendingFailure);
+            AttachedSession = session;
+            AttachedSeat = seat;
+            ReattachedToken = reconnectToken;
             return Task.CompletedTask;
         }
 

@@ -33,6 +33,9 @@
     <Reference Include="MagiGameServer.Codec">
       <HintPath>..\MagiUnityTools\Assets\_Project\Scripts\Net\Dlls\MagiGameServer.Codec.dll</HintPath>
     </Reference>
+    <Reference Include="MagiGameServer.Core">
+      <HintPath>..\MagiUnityTools\Assets\_Project\Scripts\Net\Dlls\MagiGameServer.Core.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>

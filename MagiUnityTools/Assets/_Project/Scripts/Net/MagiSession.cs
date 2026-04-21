@@ -58,6 +58,15 @@ namespace Magi.UnityTools.Net
         public SeatId Seat => _seat;
         public SessionDispatcher<TState, TAction> Dispatcher => _dispatcher;
 
+        /// Stashed from the first JoinSnapshot that arrives after
+        /// ConnectAsync or ReattachAsync. Callers hold onto this (and the
+        /// SessionId + SeatId) across a transport close so a later
+        /// ReattachAsync can revive the same seat on a fresh transport.
+        /// Null before OnSessionJoined fires; null on older servers that
+        /// don't issue tokens. Lives in-memory only — persistence across
+        /// process restarts is P6 scope.
+        public string ReconnectToken { get; private set; }
+
         // Passthrough observer surface. Subscribers fire on the thread that
         // called Tick() — i.e. the main thread — because all dispatcher
         // Ingest calls happen inside Tick.
@@ -88,6 +97,79 @@ namespace Magi.UnityTools.Net
             // ConnectAsync without tripping the "already connected" guard.
             var session = await _transport.OpenSessionAsync(config, ct).ConfigureAwait(false);
             var dispatcher = new SessionDispatcher<TState, TAction>(session, seat);
+            WireDispatcher(dispatcher);
+
+            await _transport.AttachAsync(session, seat, ct).ConfigureAwait(false);
+
+            _session = session;
+            _seat = seat;
+            _dispatcher = dispatcher;
+        }
+
+        /// Zero-config connect: the server picks the lowest free seat and
+        /// returns it in the JoinSnapshot. The dispatcher is constructed
+        /// against the claimed seat, so it's ready before the first Tick()
+        /// drains the JoinSnapshot into OnSessionJoined. Same ConnectAsync
+        /// shape as the explicit-seat path: completes once the attach is
+        /// accepted; OnSessionJoined is the "ready for game actions"
+        /// signal.
+        public async Task ConnectAsync(MagiSessionConfig config, CancellationToken ct)
+        {
+            if (config == null) throw new ArgumentNullException(nameof(config));
+            if (_dispatcher != null) throw new InvalidOperationException("Session already connected");
+
+            var session = await _transport.OpenSessionAsync(config, ct).ConfigureAwait(false);
+            var claimedSeat = await _transport.ClaimAndAttachAsync(session, ct).ConfigureAwait(false);
+
+            // Dispatcher construction is deferred until the seat is known —
+            // SessionDispatcher's _ownSeat is immutable. The JoinSnapshot
+            // frame is already queued in _inbound via OnTransportFrame; the
+            // next Tick() after _dispatcher is published will drain it.
+            var dispatcher = new SessionDispatcher<TState, TAction>(session, claimedSeat);
+            WireDispatcher(dispatcher);
+
+            _session = session;
+            _seat = claimedSeat;
+            _dispatcher = dispatcher;
+        }
+
+        /// Reattach to a seat this client previously claimed, using the
+        /// reconnect token the server issued in the original JoinSnapshot.
+        /// Caller is responsible for building a transport that targets the
+        /// same server + session (e.g. the WebSocketMagiTransport
+        /// preset-session ctor). On server rejection (token mismatch,
+        /// seat already live) the underlying transport throws a
+        /// WebSocketException and the dispatcher is not published —
+        /// callers can retry with ConnectAsync (fresh claim) instead.
+        public async Task ReattachAsync(MagiSessionConfig config, SessionId session, SeatId seat, string reconnectToken, CancellationToken ct)
+        {
+            if (config == null) throw new ArgumentNullException(nameof(config));
+            if (string.IsNullOrEmpty(reconnectToken)) throw new ArgumentException("reconnectToken required", nameof(reconnectToken));
+            if (_dispatcher != null) throw new InvalidOperationException("Session already connected");
+
+            // OpenSessionAsync on a preset-session transport returns the
+            // known SessionId without hitting the wire — same contract as
+            // the secondary-seat path. For non-preset transports (e.g.
+            // tests) the server round-trips a new session, which is
+            // wrong for reattach; callers must supply the pre-seeded
+            // transport shape.
+            var openedSession = await _transport.OpenSessionAsync(config, ct).ConfigureAwait(false);
+            if (openedSession != session)
+                throw new InvalidOperationException(
+                    $"Transport opened session {openedSession} but reattach targets {session} — transport must be pre-seeded with the target session.");
+
+            var dispatcher = new SessionDispatcher<TState, TAction>(session, seat);
+            WireDispatcher(dispatcher);
+
+            await _transport.ReattachAsync(session, seat, reconnectToken, ct).ConfigureAwait(false);
+
+            _session = session;
+            _seat = seat;
+            _dispatcher = dispatcher;
+        }
+
+        private void WireDispatcher(SessionDispatcher<TState, TAction> dispatcher)
+        {
             dispatcher.OnSessionJoined += e => OnSessionJoined?.Invoke(e);
             dispatcher.OnStateAdvanced += e => OnStateAdvanced?.Invoke(e);
             dispatcher.OnPredictionMatched += e => OnPredictionMatched?.Invoke(e);
@@ -97,12 +179,6 @@ namespace Magi.UnityTools.Net
             dispatcher.OnError += e => OnError?.Invoke(e);
             dispatcher.OutgoingAction += SendActionFireAndForget;
             dispatcher.OutgoingTakeback += SendTakebackFireAndForget;
-
-            await _transport.AttachAsync(session, seat, ct).ConfigureAwait(false);
-
-            _session = session;
-            _seat = seat;
-            _dispatcher = dispatcher;
         }
 
         public void Submit(TAction action, long predictedStateHash)
@@ -143,7 +219,18 @@ namespace Magi.UnityTools.Net
             switch (frame.Kind)
             {
                 case ServerFrameKind.JoinSnapshot:
-                    if (frame.JoinSnapshot != null) _dispatcher.Ingest(frame.JoinSnapshot);
+                    if (frame.JoinSnapshot != null)
+                    {
+                        // Stash the token on the main thread before the
+                        // dispatcher handler fires, so any OnSessionJoined
+                        // subscriber that wants to capture it finds a
+                        // consistent value. A reattach echoes the same
+                        // token, so overwriting on subsequent JoinSnapshot
+                        // frames is a no-op in practice.
+                        if (!string.IsNullOrEmpty(frame.JoinSnapshot.ReconnectToken))
+                            ReconnectToken = frame.JoinSnapshot.ReconnectToken;
+                        _dispatcher.Ingest(frame.JoinSnapshot);
+                    }
                     break;
                 case ServerFrameKind.StateEcho:
                     if (frame.Echo != null) _dispatcher.Ingest(frame.Echo);

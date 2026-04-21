@@ -65,6 +65,29 @@ namespace Magi.UnityTools.Net
             lock (_listenersMutex) { _listeners.Remove(seat.Value); }
         }
 
+        /// Server-claim analogue for the in-process transport: finds the
+        /// lowest seat index with no live listener and atomically attaches.
+        /// Returns false if every seat in [0, SeatCount) is already in use.
+        /// Mirrors SessionRuntime.HandleClaim's O(n) scan — SeatCount is
+        /// capped by module.MaxSeats so the linear scan is cheaper than
+        /// maintaining a sorted free-set.
+        public bool TryClaimAndAttach(Action<ServerFrame<TState>> deliverer, out SeatId seat)
+        {
+            if (deliverer == null) throw new ArgumentNullException(nameof(deliverer));
+            lock (_listenersMutex)
+            {
+                for (int i = 0; i < _session.SeatCount; i++)
+                {
+                    if (_listeners.ContainsKey(i)) continue;
+                    _listeners[i] = deliverer;
+                    seat = new SeatId(i);
+                    return true;
+                }
+            }
+            seat = default;
+            return false;
+        }
+
         /// Builds the JoinSnapshot frame a freshly-attached seat should see.
         /// Lives on the bus (not the transport) so projection and hashing go
         /// through the same Session path that echoes do — keeps the "server

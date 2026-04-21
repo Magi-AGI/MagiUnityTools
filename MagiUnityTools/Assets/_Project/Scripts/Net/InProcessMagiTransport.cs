@@ -81,6 +81,36 @@ namespace Magi.UnityTools.Net
             return Task.CompletedTask;
         }
 
+        public Task<SeatId> ClaimAndAttachAsync(SessionId session, CancellationToken ct)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+                throw new ObjectDisposedException(nameof(InProcessMagiTransport<TState, TAction>));
+            if (_attached) throw new InvalidOperationException("AttachAsync already called");
+            if (session != _bus.SessionId)
+                throw new ArgumentException(
+                    $"Attach session {session} does not match bus session {_bus.SessionId}",
+                    nameof(session));
+
+            if (!_bus.TryClaimAndAttach(DeliverFrame, out var claimed))
+                throw new InvalidOperationException("session_full");
+
+            _seat = claimed;
+            _attached = true;
+            DeliverFrame(new ServerFrame<TState>
+            {
+                Kind = ServerFrameKind.JoinSnapshot,
+                JoinSnapshot = _bus.BuildJoinSnapshot(claimed),
+            });
+            return Task.FromResult(claimed);
+        }
+
+        /// In-process transport has no socket to drop and nothing to reattach
+        /// to — the bus keeps all seats live for the life of the process.
+        /// Callers targeting reconnect flows should be on the WebSocket path.
+        public Task ReattachAsync(SessionId session, SeatId seat, string reconnectToken, CancellationToken ct)
+            => Task.FromException(new NotSupportedException(
+                "InProcessMagiTransport does not support reattach — the bus never disconnects seats."));
+
         public Task SendAsync(ActionEnvelope<TAction> envelope, CancellationToken ct)
         {
             if (Volatile.Read(ref _disposed) != 0)

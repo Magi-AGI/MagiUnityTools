@@ -59,6 +59,7 @@ namespace Magi.UnityTools.Net.Tests
             public Type ActionType => typeof(CounterAction);
             public Type StateType => typeof(CounterState);
             public object CreateInitialState(GameConfig config) => new CounterState { Value = 0 };
+            public object SetSeatPresence(object state, SeatId seat, bool isConnected) => state;
         }
 
         private static (Session session, InProcessSessionBus<CounterState> bus) NewBus(int seatCount = 2)
@@ -340,6 +341,52 @@ namespace Magi.UnityTools.Net.Tests
             session.Tick();
             Assert.AreEqual(0, transportErrors,
                 "InProcessMagiTransport must not raise OnTransportError for send faults");
+        }
+
+        // P3 parity: the in-process bus's claim scan picks the lowest free
+        // seat just like the server dispatcher. Three transports connect
+        // via the zero-config path on a 3-seat bus and must land on
+        // 0, 1, 2 in order.
+        [Test]
+        public async Task ClaimAndAttachAsync_AssignsLowestFreeSeat_InOrder()
+        {
+            var (_, bus) = NewBus(seatCount: 3);
+            var t0 = new InProcessMagiTransport<CounterState, CounterAction>(bus);
+            var t1 = new InProcessMagiTransport<CounterState, CounterAction>(bus);
+            var t2 = new InProcessMagiTransport<CounterState, CounterAction>(bus);
+            var s0 = new MagiSession<CounterState, CounterAction>(t0);
+            var s1 = new MagiSession<CounterState, CounterAction>(t1);
+            var s2 = new MagiSession<CounterState, CounterAction>(t2);
+
+            await s0.ConnectAsync(TestConfig(), CancellationToken.None);
+            await s1.ConnectAsync(TestConfig(), CancellationToken.None);
+            await s2.ConnectAsync(TestConfig(), CancellationToken.None);
+
+            Assert.AreEqual(new SeatId(0), s0.Seat);
+            Assert.AreEqual(new SeatId(1), s1.Seat);
+            Assert.AreEqual(new SeatId(2), s2.Seat);
+        }
+
+        // Full session rejects further claims with session_full — symmetric
+        // with the server's PolicyViolation close. The client-visible shape
+        // is an InvalidOperationException from ClaimAndAttachAsync.
+        [Test]
+        public async Task ClaimAndAttachAsync_AllSeatsTaken_ThrowsSessionFull()
+        {
+            var (_, bus) = NewBus(seatCount: 2);
+            var t0 = new InProcessMagiTransport<CounterState, CounterAction>(bus);
+            var t1 = new InProcessMagiTransport<CounterState, CounterAction>(bus);
+            var t2 = new InProcessMagiTransport<CounterState, CounterAction>(bus);
+            var s0 = new MagiSession<CounterState, CounterAction>(t0);
+            var s1 = new MagiSession<CounterState, CounterAction>(t1);
+            var s2 = new MagiSession<CounterState, CounterAction>(t2);
+
+            await s0.ConnectAsync(TestConfig(), CancellationToken.None);
+            await s1.ConnectAsync(TestConfig(), CancellationToken.None);
+            var ex = Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await s2.ConnectAsync(TestConfig(), CancellationToken.None));
+            StringAssert.Contains("session_full", ex.Message);
+            Assert.IsFalse(s2.IsConnected, "failed claim must not publish the dispatcher");
         }
     }
 }

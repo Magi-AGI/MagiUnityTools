@@ -23,6 +23,15 @@ namespace Magi.UnityTools.Net
     /// ReceiveAsync is likewise never called concurrently.
     public sealed class WebSocketMagiTransport<TState, TAction> : IMagiTransport<TState, TAction>
     {
+        // Shutdown cap: if the server doesn't acknowledge the close frame
+        // or the background receive task doesn't unwind within this
+        // window, DisposeAsync falls through to Abort() + fire-and-forget
+        // on the receive task so the caller's shutdown path isn't pinned
+        // by an unresponsive peer. Three seconds matches the server-side
+        // SessionShutdownHostedService drain budget on the host so both
+        // ends give up at the same grain.
+        private static readonly TimeSpan CloseHandshakeTimeout = TimeSpan.FromSeconds(3);
+
         private readonly HttpClient _http;
         private readonly bool _ownsHttp;
         private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
@@ -105,6 +114,73 @@ namespace Magi.UnityTools.Net
             _receiveTask = Task.Run(ReceiveLoopAsync);
         }
 
+        public async Task ReattachAsync(SessionId session, SeatId seat, string reconnectToken, CancellationToken ct)
+        {
+            if (_ws != null) throw new InvalidOperationException("AttachAsync already called");
+            if (string.IsNullOrEmpty(_baseUri)) throw new InvalidOperationException("OpenSessionAsync must run before AttachAsync");
+            if (string.IsNullOrEmpty(reconnectToken)) throw new ArgumentException("reconnectToken required", nameof(reconnectToken));
+
+            _ws = new ClientWebSocket();
+            _cts = new CancellationTokenSource();
+            // Server rejection (token_mismatch, seat_already_attached)
+            // surfaces here as a WebSocketException because ConnectAsync
+                // sees the handshake completing but the subsequent close
+            // frame propagates up. Callers catch and fall through to
+            // ClaimAndAttachAsync.
+            await _ws.ConnectAsync(BuildWebSocketReattachUri(session, seat, reconnectToken), ct).ConfigureAwait(false);
+            _receiveTask = Task.Run(ReceiveLoopAsync);
+        }
+
+        public async Task<SeatId> ClaimAndAttachAsync(SessionId session, CancellationToken ct)
+        {
+            if (_ws != null) throw new InvalidOperationException("AttachAsync already called");
+            if (string.IsNullOrEmpty(_baseUri)) throw new InvalidOperationException("OpenSessionAsync must run before AttachAsync");
+
+            _ws = new ClientWebSocket();
+            _cts = new CancellationTokenSource();
+            await _ws.ConnectAsync(BuildWebSocketUriNoSeat(session), ct).ConfigureAwait(false);
+
+            // Peel the first frame off synchronously so the caller knows
+            // which seat the server assigned. The receive loop is started
+            // only after this frame, so ReceiveAsync isn't called
+            // concurrently (WebSocket forbids that). A Close frame here
+            // means the server rejected the claim (session_full) — we
+            // throw with the close reason so the caller can report it.
+            var buffer = new byte[8192];
+            var accumulator = new List<byte>();
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct).ConfigureAwait(false);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    var reason = _ws.CloseStatusDescription ?? _ws.CloseStatus?.ToString() ?? "closed";
+                    throw new InvalidOperationException("Server rejected attach: " + reason);
+                }
+                for (int i = 0; i < result.Count; i++) accumulator.Add(buffer[i]);
+            } while (!result.EndOfMessage);
+
+            ServerFrame<TState> frame;
+            try
+            {
+                frame = EnvelopeCodec.Deserialize<ServerFrame<TState>>(accumulator.ToArray());
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("First frame on claim attach failed to decode", ex);
+            }
+            if (frame == null || frame.Kind != ServerFrameKind.JoinSnapshot || frame.JoinSnapshot == null)
+                throw new InvalidOperationException("Expected JoinSnapshot as first frame on claim attach");
+
+            // Deliver the JoinSnapshot through the normal OnFrame path so
+            // MagiSession enqueues it. Dispatcher isn't set yet — MagiSession
+            // just queues in _inbound and drains on the next Tick(), same
+            // shape as explicit-seat attach.
+            OnFrame?.Invoke(frame);
+            _receiveTask = Task.Run(ReceiveLoopAsync);
+            return frame.JoinSnapshot.ForSeat;
+        }
+
         public Task SendAsync(ActionEnvelope<TAction> envelope, CancellationToken ct)
         {
             if (envelope == null) throw new ArgumentNullException(nameof(envelope));
@@ -174,6 +250,15 @@ namespace Magi.UnityTools.Net
         }
 
         private Uri BuildWebSocketUri(SessionId session, SeatId seat)
+            => new Uri(BuildBaseWebSocketUri(session) + "?seat=" + seat.Value);
+
+        private Uri BuildWebSocketUriNoSeat(SessionId session)
+            => new Uri(BuildBaseWebSocketUri(session));
+
+        private Uri BuildWebSocketReattachUri(SessionId session, SeatId seat, string token)
+            => new Uri(BuildBaseWebSocketUri(session) + "?seat=" + seat.Value + "&reattach=" + Uri.EscapeDataString(token));
+
+        private string BuildBaseWebSocketUri(SessionId session)
         {
             // Derive ws:// from http:// (wss:// from https://). Falls back to
             // inserting ws:// if BaseUri didn't include a scheme — but
@@ -187,21 +272,48 @@ namespace Magi.UnityTools.Net
                 scheme = string.Equals(proto, "https", StringComparison.OrdinalIgnoreCase) ? "wss" : "ws";
                 rest = _baseUri.Substring(schemeEnd + 3);
             }
-            return new Uri($"{scheme}://{rest}/session/{session.Value}?seat={seat.Value}");
+            return $"{scheme}://{rest}/session/{session.Value}";
         }
 
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
             try { _cts?.Cancel(); } catch { }
+
             if (_ws != null && (_ws.State == WebSocketState.Open || _ws.State == WebSocketState.CloseReceived))
             {
-                try { await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None).ConfigureAwait(false); } catch { }
+                // Bound the close handshake — a server that has stopped
+                // acking frames (hung process, dropped route) would
+                // otherwise pin this await indefinitely and the Unity
+                // player's shutdown path would wedge on it.
+                using var closeCts = new CancellationTokenSource(CloseHandshakeTimeout);
+                try
+                {
+                    await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", closeCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    try { _ws.Abort(); } catch { }
+                }
+                catch
+                {
+                    // WebSocketException / InvalidOperationException from a
+                    // half-closed socket — ignore, we're tearing down.
+                }
             }
+
             if (_receiveTask != null)
             {
-                try { await _receiveTask.ConfigureAwait(false); } catch { }
+                // Same bound on the receive task: the loop exits on either
+                // _cts cancellation or a Close frame, but if neither
+                // arrives we don't wait forever.
+                var completed = await Task.WhenAny(_receiveTask, Task.Delay(CloseHandshakeTimeout)).ConfigureAwait(false);
+                if (completed == _receiveTask)
+                {
+                    try { await _receiveTask.ConfigureAwait(false); } catch { }
+                }
             }
+
             _ws?.Dispose();
             _cts?.Dispose();
             _sendLock.Dispose();

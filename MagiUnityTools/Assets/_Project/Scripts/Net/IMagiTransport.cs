@@ -27,6 +27,25 @@ namespace Magi.UnityTools.Net
         /// always the JoinSnapshot the server emits on attach.
         Task AttachAsync(SessionId session, SeatId seat, CancellationToken ct);
 
+        /// Zero-config attach: the server picks the lowest free seat.
+        /// Returns the assigned SeatId so the caller can construct a
+        /// dispatcher bound to it. Throws if the session is full (server
+        /// closes the socket with PolicyViolation "session_full"). The
+        /// JoinSnapshot is delivered through OnFrame exactly like the
+        /// explicit-seat path — the return value just tells the caller
+        /// which seat it landed on.
+        Task<SeatId> ClaimAndAttachAsync(SessionId session, CancellationToken ct);
+
+        /// Reattach a previously-claimed seat using the reconnect token
+        /// the server returned in the original JoinSnapshot. The server
+        /// matches (seat, token) against its ownership map — a mismatch
+        /// or unknown seat closes the socket with PolicyViolation
+        /// "token_mismatch", and AttachAsync-style callers must fall
+        /// back to ClaimAndAttachAsync. On success the JoinSnapshot
+        /// arrives through OnFrame carrying the same token, so the
+        /// caller's stash stays stable across multiple reconnects.
+        Task ReattachAsync(SessionId session, SeatId seat, string reconnectToken, CancellationToken ct);
+
         Task SendAsync(ActionEnvelope<TAction> envelope, CancellationToken ct);
         Task SendAsync(TakebackRequest request, CancellationToken ct);
 

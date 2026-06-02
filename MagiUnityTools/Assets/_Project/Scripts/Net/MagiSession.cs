@@ -95,11 +95,11 @@ namespace Magi.UnityTools.Net
             // or AttachAsync throws, _dispatcher stays null — IsConnected
             // stays false, Submit still blocks, and the caller can retry
             // ConnectAsync without tripping the "already connected" guard.
-            var session = await _transport.OpenSessionAsync(config, ct).ConfigureAwait(false);
+            var session = await _transport.OpenSessionAsync(config, ct);
             var dispatcher = new SessionDispatcher<TState, TAction>(session, seat);
             WireDispatcher(dispatcher);
 
-            await _transport.AttachAsync(session, seat, ct).ConfigureAwait(false);
+            await _transport.AttachAsync(session, seat, ct);
 
             _session = session;
             _seat = seat;
@@ -118,8 +118,8 @@ namespace Magi.UnityTools.Net
             if (config == null) throw new ArgumentNullException(nameof(config));
             if (_dispatcher != null) throw new InvalidOperationException("Session already connected");
 
-            var session = await _transport.OpenSessionAsync(config, ct).ConfigureAwait(false);
-            var claimedSeat = await _transport.ClaimAndAttachAsync(session, ct).ConfigureAwait(false);
+            var session = await _transport.OpenSessionAsync(config, ct);
+            var claimedSeat = await _transport.ClaimAndAttachAsync(session, ct);
 
             // Dispatcher construction is deferred until the seat is known —
             // SessionDispatcher's _ownSeat is immutable. The JoinSnapshot
@@ -153,7 +153,7 @@ namespace Magi.UnityTools.Net
             // tests) the server round-trips a new session, which is
             // wrong for reattach; callers must supply the pre-seeded
             // transport shape.
-            var openedSession = await _transport.OpenSessionAsync(config, ct).ConfigureAwait(false);
+            var openedSession = await _transport.OpenSessionAsync(config, ct);
             if (openedSession != session)
                 throw new InvalidOperationException(
                     $"Transport opened session {openedSession} but reattach targets {session} — transport must be pre-seeded with the target session.");
@@ -161,7 +161,7 @@ namespace Magi.UnityTools.Net
             var dispatcher = new SessionDispatcher<TState, TAction>(session, seat);
             WireDispatcher(dispatcher);
 
-            await _transport.ReattachAsync(session, seat, reconnectToken, ct).ConfigureAwait(false);
+            await _transport.ReattachAsync(session, seat, reconnectToken, ct);
 
             _session = session;
             _seat = seat;
@@ -287,7 +287,7 @@ namespace Magi.UnityTools.Net
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
             _transport.OnFrame -= OnTransportFrame;
             _transport.OnTransportError -= OnTransportErrorRaised;
-            await _transport.DisposeAsync().ConfigureAwait(false);
+            await _transport.DisposeAsync();
         }
     }
 }

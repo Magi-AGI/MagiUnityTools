@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Magi.UnityTools.Net.Verify</RootNamespace>
+    <!--
+      Parallel .NET test harness for the Unity-side MagiUnityTools.Net
+      shim. Compiles the same .cs sources that Unity's asmdef sees
+      (Assets/_Project/Scripts/Net/ plus Assets/_Project/Tests/EditMode/
+      Net/), links the three vendored MagiGameServer DLLs, and runs the
+      EditMode tests under `dotnet test` so iteration doesn't require a
+      running Unity Editor. Intended as a build-time sanity check — the
+      authoritative runtime is still Unity's Test Framework, which picks
+      up the same files via the asmdef.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\MagiUnityTools\Assets\_Project\Scripts\Net\**\*.cs" />
+    <Compile Include="..\MagiUnityTools\Assets\_Project\Tests\EditMode\Net\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="MagiGameServer.Contracts">
+      <HintPath>..\MagiUnityTools\Assets\_Project\Scripts\Net\Dlls\MagiGameServer.Contracts.dll</HintPath>
+    </Reference>
+    <Reference Include="MagiGameServer.Client">
+      <HintPath>..\MagiUnityTools\Assets\_Project\Scripts\Net\Dlls\MagiGameServer.Client.dll</HintPath>
+    </Reference>
+    <Reference Include="MagiGameServer.Codec">
+      <HintPath>..\MagiUnityTools\Assets\_Project\Scripts\Net\Dlls\MagiGameServer.Codec.dll</HintPath>
+    </Reference>
+    <Reference Include="MagiGameServer.Core">
+      <HintPath>..\MagiUnityTools\Assets\_Project\Scripts\Net\Dlls\MagiGameServer.Core.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+
+</Project>

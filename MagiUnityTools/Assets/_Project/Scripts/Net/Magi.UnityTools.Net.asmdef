@@ -1,0 +1,20 @@
+{
+    "name": "Magi.UnityTools.Net",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "MagiGameServer.Contracts.dll",
+        "MagiGameServer.Core.dll",
+        "MagiGameServer.Client.dll",
+        "MagiGameServer.Codec.dll",
+        "System.Text.Json.dll",
+        "System.Text.Encodings.Web.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

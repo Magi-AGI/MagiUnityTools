@@ -1,0 +1,29 @@
+{
+    "name": "Magi.UnityTools.Net.Tests",
+    "rootNamespace": "Magi.UnityTools.Net.Tests",
+    "references": [
+        "Magi.UnityTools.Net"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "MagiGameServer.Contracts.dll",
+        "MagiGameServer.Core.dll",
+        "MagiGameServer.Client.dll",
+        "MagiGameServer.Codec.dll",
+        "System.Text.Json.dll",
+        "System.Text.Encodings.Web.dll",
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}
